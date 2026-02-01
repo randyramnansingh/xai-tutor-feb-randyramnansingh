@@ -1,13 +1,39 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Topbar } from "@/components/layout/topbar";
 import { Card, CardHeader, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import { Copy, Printer, Trash2, Pencil, MoreHorizontal, ChevronUp, ChevronDown } from "lucide-react";
+import { Copy, Printer, Trash2, Pencil, MoreHorizontal, ChevronUp, ChevronDown, X } from "lucide-react";
 import { Avatar } from "@/components/ui/avatar";
+
+// Types and helper to map API -> UI
+type Order = {
+  id: string;
+  orderNumber: string;
+  customerName: string;
+  date: string; // ISO
+  status: "Pending" | "Completed" | "Refunded";
+  total: number; // dollars
+  paymentStatus: "Paid" | "Unpaid";
+};
+
+function apiToUiOrder(o: any): Order {
+  const statusRaw = String(o.status ?? "pending").toLowerCase();
+  const paymentRaw = String(o.payment_status ?? "paid").toLowerCase();
+  const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+  return {
+    id: String(o.id),
+    orderNumber: String(o.order_number ?? o.orderNumber ?? ""),
+    customerName: o.customer?.name ?? o.customer_name ?? "Unknown",
+    date: o.order_date ? new Date(o.order_date).toISOString() : new Date().toISOString(),
+    status: cap(statusRaw) as Order["status"],
+    total: Number(o.total_amount ?? o.total ?? 0),
+    paymentStatus: cap(paymentRaw) as Order["paymentStatus"],
+  };
+}
 
 export default function OrdersPage() {
   const [collapsed, setCollapsed] = useState(false);
@@ -17,8 +43,24 @@ export default function OrdersPage() {
     { key: null, dir: "asc" }
   );
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [orders, setOrders] = useState<Order[]>(() => seedOrders());
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(9);
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
   const [showBulkMenu, setShowBulkMenu] = useState(false);
+  const [showCreate, setShowCreate] = useState(false);
+  const [createLoading, setCreateLoading] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [form, setForm] = useState({
+    name: "",
+    email: "",
+    avatar: "",
+    order_date: "",
+    status: "pending" as "pending" | "completed" | "refunded",
+    payment_status: "unpaid" as "paid" | "unpaid",
+    total_amount: 0,
+  });
   const [stats, setStats] = useState({
     total_orders_this_month: 0,
     pending_orders: 0,
@@ -31,90 +73,62 @@ export default function OrdersPage() {
     fetch(`${base}/orders/stats`)
       .then((r) => r.json())
       .then((data) => {
-        setStats((prev) => ({
-          ...prev,
+        setStats({
           total_orders_this_month: data.total_orders_this_month ?? 0,
           pending_orders: data.pending_orders ?? 0,
           shipped_orders: data.shipped_orders ?? 0,
           refunded_orders: data.refunded_orders ?? 0,
-        }));
+        });
       })
       .catch((err) => {
         console.error("Failed to load order stats", err);
       });
   }, []);
 
-  type Order = {
-    id: string;
-    orderNumber: string;
-    customerName: string;
-    date: string; // ISO
-    status: "Pending" | "Completed" | "Refunded";
-    total: number; // cents or dollars
-    paymentStatus: "Paid" | "Unpaid";
-  };
+  // Fetch orders when filter/page/limit changes
+  useEffect(() => {
+    const controller = new AbortController();
+    const base = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
+    const params = new URLSearchParams({ status: filter, page: String(page), limit: String(limit) });
+    fetch(`${base}/orders?${params.toString()}`, { signal: controller.signal })
+      .then((r) => r.json())
+      .then((data) => {
+        const apiOrders = (data.orders ?? []).map((o: any) => apiToUiOrder(o));
+        setOrders(apiOrders);
+        setTotal(data.total ?? 0);
+        setTotalPages(data.total_pages ?? 1);
+      })
+      .catch((err) => {
+        if (err?.name !== "AbortError") console.error("Failed to load orders", err);
+      });
+    return () => controller.abort();
+  }, [filter, page, limit]);
 
-  function seedOrders(): Order[] {
-    const names = [
-      "Esther Kehn",
-      "Denise Kuhn",
-      "Clint Hoppe",
-      "Darin Deckow",
-      "Joaquelyn Robel",
-      "Erin Bins",
-      "Gretchen Quitz",
-      "Stewart Kules",
-    ];
-    const statuses: Order["status"][] = ["Pending", "Completed", "Refunded"];
-    const pays: Order["paymentStatus"][] = ["Paid", "Unpaid"];
-    const base = new Date("2024-12-16").getTime();
-    return Array.from({ length: 12 }).map((_, i) => {
-      const name = names[i % names.length];
-      const status = statuses[i % statuses.length];
-      const paymentStatus = status === "Pending" ? (i % 2 ? "Paid" : "Unpaid") : "Paid";
-      const date = new Date(base - i * 24 * 3600 * 1000).toISOString();
-      return {
-        id: `ord-${i + 1}`,
-        orderNumber: `#ORDID${String(100 + i).padStart(2, "0")}`,
-        customerName: name,
-        date,
-        status,
-        total: Math.round(50 + Math.random() * 70),
-        paymentStatus,
-      };
-    });
-  }
-
-  const filtered = orders.filter((o) => {
-    if (filter === "all") return true;
-    if (filter === "incomplete") return o.paymentStatus === "Unpaid";
-    if (filter === "ongoing") return o.status === "Pending";
-    if (filter === "finished") return o.status === "Completed";
-    if (filter === "overdue") {
-      const daysOld = (Date.now() - new Date(o.date).getTime()) / (1000 * 3600 * 24);
-      return o.status === "Pending" && daysOld > 7;
+  // Sorting within the current page (server paginates)
+  const sorted = useMemo(() => {
+    const data = [...orders];
+    if (sort.key) {
+      const key = sort.key;
+      const dir = sort.dir === "asc" ? 1 : -1;
+      data.sort((a: any, b: any) => {
+        const av = a[key];
+        const bv = b[key];
+        if (av < bv) return -1 * dir;
+        if (av > bv) return 1 * dir;
+        return 0;
+      });
     }
-    return true;
-  });
+    return data;
+  }, [orders, sort]);
 
-  const sorted = [...filtered].sort((a, b) => {
-    if (!sort.key) return 0;
-    const dir = sort.dir === "asc" ? 1 : -1;
-    const va = a[sort.key];
-    const vb = b[sort.key];
-    if (typeof va === "number" && typeof vb === "number") return (va - vb) * dir;
-    return String(va).localeCompare(String(vb)) * dir;
-  });
+  const visible = sorted; // server handles page/limit
+  const allVisibleSelected = visible.length > 0 && visible.every((o) => selected.has(o.id));
+  const someVisibleSelected = visible.some((o) => selected.has(o.id)) && !allVisibleSelected;
 
-  const visible = sorted.slice(0, 9);
-
-  const allVisibleSelected = visible.every((o) => selected.has(o.id));
-  const someVisibleSelected = visible.some((o) => selected.has(o.id));
-
-  function toggleAllVisible() {
+  function toggleAllVisible(e: React.ChangeEvent<HTMLInputElement>) {
     const next = new Set(selected);
-    if (allVisibleSelected) visible.forEach((o) => next.delete(o.id));
-    else visible.forEach((o) => next.add(o.id));
+    if (e.target.checked) visible.forEach((o) => next.add(o.id));
+    else visible.forEach((o) => next.delete(o.id));
     setSelected(next);
   }
 
@@ -126,38 +140,93 @@ export default function OrdersPage() {
   }
 
   function bulkDelete() {
-    setOrders((prev) => prev.filter((o) => !selected.has(o.id)));
-    setSelected(new Set());
+    const base = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
+    const body = { order_ids: Array.from(selected) };
+    fetch(`${base}/orders/bulk`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    })
+      .then(() => {
+        setSelected(new Set());
+        const params = new URLSearchParams({ status: filter, page: String(page), limit: String(limit) });
+        return fetch(`${base}/orders?${params.toString()}`).then((r) => r.json());
+      })
+      .then((data) => {
+        setOrders((data.orders ?? []).map((o: any) => apiToUiOrder(o)));
+        setTotal(data.total ?? 0);
+        setTotalPages(data.total_pages ?? 1);
+      })
+      .catch((e) => console.error("bulk delete failed", e));
   }
 
   function bulkDuplicate() {
-    setOrders((prev) => {
-      const dups: Order[] = prev
-        .filter((o) => selected.has(o.id))
-        .map((o, i) => ({ ...o, id: `${o.id}-d${i}`, orderNumber: `${o.orderNumber}-D` }));
-      return [...dups, ...prev];
-    });
+    const base = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
+    const body = { order_ids: Array.from(selected) };
+    fetch(`${base}/orders/bulk/duplicate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    })
+      .then(() => {
+        setSelected(new Set());
+        const params = new URLSearchParams({ status: filter, page: String(page), limit: String(limit) });
+        return fetch(`${base}/orders?${params.toString()}`).then((r) => r.json());
+      })
+      .then((data) => {
+        setOrders((data.orders ?? []).map((o: any) => apiToUiOrder(o)));
+        setTotal(data.total ?? 0);
+        setTotalPages(data.total_pages ?? 1);
+      })
+      .catch((e) => console.error("bulk duplicate failed", e));
   }
 
   function bulkStatus(next: Order["status"]) {
-    setOrders((prev) => prev.map((o) => (selected.has(o.id) ? { ...o, status: next, paymentStatus: next === "Pending" ? o.paymentStatus : "Paid" } : o)));
-    setSelected(new Set());
-    setShowBulkMenu(false);
+    const base = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
+    const body = { order_ids: Array.from(selected), status: next.toLowerCase() } as any;
+    fetch(`${base}/orders/bulk/status`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    })
+      .then(() => {
+        setSelected(new Set());
+        setShowBulkMenu(false);
+        const params = new URLSearchParams({ status: filter, page: String(page), limit: String(limit) });
+        return fetch(`${base}/orders?${params.toString()}`).then((r) => r.json());
+      })
+      .then((data) => {
+        setOrders((data.orders ?? []).map((o: any) => apiToUiOrder(o)));
+        setTotal(data.total ?? 0);
+        setTotalPages(data.total_pages ?? 1);
+      })
+      .catch((e) => console.error("bulk status failed", e));
   }
 
   function addOrder() {
-    setOrders((prev) => [
-      {
-        id: `ord-${Date.now()}`,
-        orderNumber: `#ORDID${100 + prev.length}`,
-        customerName: "New Customer",
-        date: new Date().toISOString(),
-        status: "Pending",
-        total: 99,
-        paymentStatus: "Unpaid",
-      },
-      ...prev,
-    ]);
+    const base = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
+    const body = {
+      customer: { name: "New Customer", email: "new@example.com" },
+      total_amount: 99,
+      status: "pending",
+      payment_status: "unpaid",
+    };
+    fetch(`${base}/orders`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    })
+      .then(() => {
+        setPage(1);
+        const params = new URLSearchParams({ status: filter, page: "1", limit: String(limit) });
+        return fetch(`${base}/orders?${params.toString()}`).then((r) => r.json());
+      })
+      .then((data) => {
+        setOrders((data.orders ?? []).map((o: any) => apiToUiOrder(o)));
+        setTotal(data.total ?? 0);
+        setTotalPages(data.total_pages ?? 1);
+      })
+      .catch((e) => console.error("add order failed", e));
   }
 
   function SortableHeader({ label, k }: { label: string; k: keyof Order }) {
@@ -187,7 +256,13 @@ export default function OrdersPage() {
         <main className="mx-auto w-full max-w-6xl px-6 py-6">
           <section className="mb-6">
             <h1 className="text-xl font-semibold">All Orders</h1>
-            <p className="text-sm text-muted-foreground">Showing 1-9 of 240 entries</p>
+            <p className="text-sm text-muted-foreground">
+              {(() => {
+                const start = (page - 1) * limit + 1;
+                const end = Math.min(page * limit, total);
+                return `Showing ${total === 0 ? 0 : start}-${end} of ${total} entries`;
+              })()}
+            </p>
           </section>
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -261,7 +336,7 @@ export default function OrdersPage() {
                   )}
                 </div>
                 <Button variant="outline" onClick={() => console.log("export", visible)}>Export Orders</Button>
-                <Button onClick={addOrder}>+ Add Orders</Button>
+                <Button onClick={() => setShowCreate(true)}>+ Add Order</Button>
               </div>
             </div>
             <div className="overflow-x-auto">
@@ -335,9 +410,153 @@ export default function OrdersPage() {
                 </div>
               </div>
             )}
+            {showCreate && (
+              <div className="fixed inset-0 z-20 flex items-center justify-center bg-black/40 p-4">
+                <div className="w-full max-w-lg rounded-xl border border-border bg-background p-4 shadow-xl">
+                  <div className="mb-3 flex items-center justify-between">
+                    <h3 className="text-lg font-semibold">Create Order</h3>
+                    <button className="text-muted-foreground hover:text-foreground" onClick={() => setShowCreate(false)} aria-label="Close">
+                      <X className="h-5 w-5" />
+                    </button>
+                  </div>
+                  {createError && (
+                    <div className="mb-3 rounded-md border border-destructive/30 bg-destructive/10 p-2 text-sm text-destructive">
+                      {createError}
+                    </div>
+                  )}
+                  <form
+                    onSubmit={async (e) => {
+                      e.preventDefault();
+                      setCreateError(null);
+                      setCreateLoading(true);
+                      try {
+                        const base = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
+                        const body = {
+                          customer: { name: form.name, email: form.email, avatar: form.avatar || null },
+                          total_amount: Number(form.total_amount),
+                          status: form.status,
+                          payment_status: form.payment_status,
+                          order_date: form.order_date || null,
+                        };
+                        const res = await fetch(`${base}/orders`, {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify(body),
+                        });
+                        if (!res.ok) {
+                          const txt = await res.text();
+                          throw new Error(txt || `Request failed (${res.status})`);
+                        }
+                        // Refresh first page after creation
+                        setPage(1);
+                        const params = new URLSearchParams({ status: filter, page: "1", limit: String(limit) });
+                        const data = await fetch(`${base}/orders?${params.toString()}`).then((r) => r.json());
+                        setOrders((data.orders ?? []).map((o: any) => apiToUiOrder(o)));
+                        setTotal(data.total ?? 0);
+                        setTotalPages(data.total_pages ?? 1);
+                        setShowCreate(false);
+                        setForm({ name: "", email: "", avatar: "", order_date: "", status: "pending", payment_status: "unpaid", total_amount: 0 });
+                      } catch (err: any) {
+                        setCreateError(err?.message || "Failed to create order");
+                      } finally {
+                        setCreateLoading(false);
+                      }
+                    }}
+                    className="grid grid-cols-1 gap-3 sm:grid-cols-2"
+                  >
+                    <label className="flex flex-col gap-1">
+                      <span className="text-xs text-muted-foreground">Customer Name</span>
+                      <input className="rounded-md border border-border bg-background px-2 py-1" required
+                        value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+                    </label>
+                    <label className="flex flex-col gap-1">
+                      <span className="text-xs text-muted-foreground">Customer Email</span>
+                      <input type="email" className="rounded-md border border-border bg-background px-2 py-1" required
+                        value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+                    </label>
+                    <label className="flex flex-col gap-1 sm:col-span-2">
+                      <span className="text-xs text-muted-foreground">Avatar URL (optional)</span>
+                      <input className="rounded-md border border-border bg-background px-2 py-1"
+                        value={form.avatar} onChange={(e) => setForm({ ...form, avatar: e.target.value })} />
+                    </label>
+                    <label className="flex flex-col gap-1">
+                      <span className="text-xs text-muted-foreground">Order Date</span>
+                      <input type="date" className="rounded-md border border-border bg-background px-2 py-1"
+                        value={form.order_date} onChange={(e) => setForm({ ...form, order_date: e.target.value })} />
+                    </label>
+                    <label className="flex flex-col gap-1">
+                      <span className="text-xs text-muted-foreground">Total Amount</span>
+                      <input type="number" step="0.01" min="0" className="rounded-md border border-border bg-background px-2 py-1" required
+                        value={form.total_amount}
+                        onChange={(e) => setForm({ ...form, total_amount: Number(e.target.value) })} />
+                    </label>
+                    <label className="flex flex-col gap-1">
+                      <span className="text-xs text-muted-foreground">Status</span>
+                      <select className="rounded-md border border-border bg-background px-2 py-1"
+                        value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value as any })}>
+                        <option value="pending">Pending</option>
+                        <option value="completed">Completed</option>
+                        <option value="refunded">Refunded</option>
+                      </select>
+                    </label>
+                    <label className="flex flex-col gap-1">
+                      <span className="text-xs text-muted-foreground">Payment Status</span>
+                      <select className="rounded-md border border-border bg-background px-2 py-1"
+                        value={form.payment_status} onChange={(e) => setForm({ ...form, payment_status: e.target.value as any })}>
+                        <option value="paid">Paid</option>
+                        <option value="unpaid">Unpaid</option>
+                      </select>
+                    </label>
+                    <div className="sm:col-span-2 mt-2 flex items-center justify-end gap-2">
+                      <Button type="button" variant="outline" onClick={() => setShowCreate(false)}>Cancel</Button>
+                      <Button type="submit" disabled={createLoading}>{createLoading ? "Creating..." : "Create Order"}</Button>
+                    </div>
+                  </form>
+                </div>
+              </div>
+            )}
+            <div className="mt-4 flex items-center justify-between">
+              <div className="flex-1" />
+              <div className="flex items-center gap-2 text-sm">
+                <Button variant="outline" onClick={() => setPage((p) => Math.max(1, p - 1))}>Previous</Button>
+                {renderPageButtons(totalPages, page).map((p, i) =>
+                  p === "..." ? (
+                    <span key={`el-${i}`} className="px-2">…</span>
+                  ) : (
+                    <Button key={p as number} variant={p === page ? "default" : "outline"} onClick={() => setPage(p as number)}>
+                      {p}
+                    </Button>
+                  )
+                )}
+                <Button variant="outline" onClick={() => setPage((p) => Math.min(totalPages, p + 1))}>Next</Button>
+              </div>
+            </div>
           </div>
         </main>
       </div>
     </div>
   );
 }
+
+// Simple helper to render pagination buttons list
+function renderPageButtons(totalPages: number, current: number): (number | string)[] {
+  const pages: (number | string)[] = [];
+  const last = Math.max(1, totalPages);
+  if (last <= 5) {
+    for (let i = 1; i <= last; i++) pages.push(i);
+    return pages;
+  }
+  const addRange = (a: number, b: number) => {
+    for (let i = a; i <= b; i++) pages.push(i);
+  };
+  pages.push(1);
+  const start = Math.max(2, current - 1);
+  const end = Math.min(last - 1, current + 1);
+  if (start > 2) pages.push("...");
+  addRange(start, end);
+  if (end < last - 1) pages.push("...");
+  pages.push(last);
+  return pages;
+}
+
+// (Removed duplicate implementation)
