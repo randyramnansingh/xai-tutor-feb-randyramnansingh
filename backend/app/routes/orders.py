@@ -250,6 +250,48 @@ def bulk_delete(payload: BulkDelete):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
+@router.get("/stats")
+def order_stats():
+    """Return aggregated order statistics for dashboard cards.
+
+    - total_orders_this_month: count of orders with order_date in current month
+    - pending_orders: count where status = 'pending'
+    - shipped_orders: count where status = 'completed' (mapping 'completed' -> 'shipped')
+    - refunded_orders: count where status = 'refunded'
+    """
+    try:
+        from datetime import datetime
+
+        with get_db() as conn:
+            cursor = conn.cursor()
+
+            # Current year-month for order_date (YYYY-MM)
+            ym = datetime.now().strftime("%Y-%m")
+
+            cursor.execute(
+                "SELECT COUNT(1) FROM orders WHERE order_date LIKE ?",
+                (f"{ym}-%",),
+            )
+            total_this_month = cursor.fetchone()[0]
+
+            cursor.execute("SELECT COUNT(1) FROM orders WHERE status = 'pending'")
+            pending = cursor.fetchone()[0]
+
+            cursor.execute("SELECT COUNT(1) FROM orders WHERE status = 'completed'")
+            shipped = cursor.fetchone()[0]
+
+            cursor.execute("SELECT COUNT(1) FROM orders WHERE status = 'refunded'")
+            refunded = cursor.fetchone()[0]
+
+            return {
+                "total_orders_this_month": total_this_month,
+                "pending_orders": pending,
+                "shipped_orders": shipped,
+                "refunded_orders": refunded,
+            }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
 
 @router.get("/{order_id}")
 def get_order(order_id: str):
