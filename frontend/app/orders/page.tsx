@@ -1,3 +1,5 @@
+"use client";
+import { useState } from "react";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Topbar } from "@/components/layout/topbar";
 import { Card, CardHeader, CardContent } from "@/components/ui/card";
@@ -7,11 +9,12 @@ import { Button } from "@/components/ui/button";
 import { Copy, Printer, Trash2 } from "lucide-react";
 
 export default function OrdersPage() {
+  const [collapsed, setCollapsed] = useState(false);
   return (
     <div className="flex min-h-screen bg-muted/30">
-      <Sidebar />
+      <Sidebar collapsed={collapsed} />
       <div className="flex w-full flex-col">
-        <Topbar />
+        <Topbar onToggleSidebar={() => setCollapsed((v) => !v)} />
         <main className="mx-auto w-full max-w-6xl px-6 py-6">
           <section className="mb-6">
             <h1 className="text-xl font-semibold">All Orders</h1>

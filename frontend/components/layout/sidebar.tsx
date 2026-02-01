@@ -17,21 +17,24 @@ const navSettings = [
   { label: "Help Center", href: "/help", icon: HelpCircle },
 ];
 
-export function Sidebar({ className }: { className?: string }) {
+export function Sidebar({ className, collapsed = false }: { className?: string; collapsed?: boolean }) {
   return (
     <aside
       className={cn(
-        "flex h-screen w-64 shrink-0 flex-col border-r border-border bg-background/60 backdrop-blur",
+        "flex h-screen shrink-0 flex-col border-r border-border bg-background/60 backdrop-blur",
+        collapsed ? "w-16" : "w-64",
         className
       )}
     >
       <div className="flex items-center gap-2 px-4 py-4">
-        <div className="h-8 w-8 rounded bg-primary" />
-        <span className="text-lg font-semibold">Prodex</span>
+        <div className="h-8 w-8 rounded bg-orange-500" />
+        {!collapsed && <span className="text-lg font-semibold">Prodex</span>}
       </div>
 
       <div className="px-3">
-        <div className="mb-2 px-2 text-xs font-medium text-muted-foreground">Main</div>
+        {!collapsed && (
+          <div className="mb-2 px-2 text-xs font-medium text-muted-foreground">Main</div>
+        )}
         <nav className="space-y-1">
           {navMain.map((item) => (
             <Link
@@ -43,12 +46,14 @@ export function Sidebar({ className }: { className?: string }) {
               )}
             >
               <item.icon className="h-4 w-4" />
-              {item.label}
+              {!collapsed && item.label}
             </Link>
           ))}
         </nav>
 
-        <div className="mt-6 mb-2 px-2 text-xs font-medium text-muted-foreground">Settings</div>
+        {!collapsed && (
+          <div className="mt-6 mb-2 px-2 text-xs font-medium text-muted-foreground">Settings</div>
+        )}
         <nav className="space-y-1">
           {navSettings.map((item) => (
             <Link
@@ -57,23 +62,26 @@ export function Sidebar({ className }: { className?: string }) {
               className="flex items-center gap-2 rounded-md px-3 py-2 text-sm hover:bg-accent hover:text-accent-foreground"
             >
               <item.icon className="h-4 w-4" />
-              {item.label}
+              {!collapsed && item.label}
             </Link>
           ))}
         </nav>
+        {!collapsed && (
+          <>
+            <div className="mt-6 rounded-md bg-muted p-3">
+              <div className="mb-2 text-xs text-muted-foreground">Dark Mode</div>
+              <button className="flex w-full items-center justify-between rounded-md border border-border bg-background px-3 py-2 text-sm">
+                <span>Toggle</span>
+                <Moon className="h-4 w-4" />
+              </button>
+            </div>
 
-        <div className="mt-6 rounded-md bg-muted p-3">
-          <div className="mb-2 text-xs text-muted-foreground">Dark Mode</div>
-          <button className="flex w-full items-center justify-between rounded-md border border-border bg-background px-3 py-2 text-sm">
-            <span>Toggle</span>
-            <Moon className="h-4 w-4" />
-          </button>
-        </div>
-
-        <div className="mt-4 rounded-md border border-border p-3">
-          <div className="mb-2 text-xs text-muted-foreground">Upgrade to Premium</div>
-          <button className="w-full rounded-md bg-foreground px-3 py-2 text-background">Upgrade Now</button>
-        </div>
+            <div className="mt-4 rounded-md border border-border p-3">
+              <div className="mb-2 text-xs text-muted-foreground">Upgrade to Premium</div>
+              <button className="w-full rounded-md bg-foreground px-3 py-2 text-background">Upgrade Now</button>
+            </div>
+          </>
+        )}
       </div>
     </aside>
   );
