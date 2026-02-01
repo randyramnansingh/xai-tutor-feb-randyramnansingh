@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 
+from app.routes import health_router, items_router, orders_router
 from migrate import run_migrations
 
 app = FastAPI(title="Backend Exercise API", version="1.0.0")
@@ -7,6 +8,7 @@ app = FastAPI(title="Backend Exercise API", version="1.0.0")
 # Register routers
 app.include_router(health_router)
 app.include_router(items_router)
+app.include_router(orders_router)
 
 @app.on_event("startup")
 def apply_migrations():
