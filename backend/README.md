@@ -21,6 +21,20 @@ Server runs at `http://localhost:8000`
 
 ---
 
+## Migrations & Seeding
+
+Run SQLite migrations, then seed 200+ mock orders:
+
+```bash
+cd backend
+python migrate.py upgrade
+python seed_orders.py
+```
+
+By default, the database file is created at `app.db`. Override with `DATABASE_PATH=/custom/path.db`.
+
+---
+
 ## Mock Data
 
 **Important:** Candidates must seed their own mock data. Create orders matching the design with various statuses and payment states.
