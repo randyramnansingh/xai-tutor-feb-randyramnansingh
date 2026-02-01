@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Topbar } from "@/components/layout/topbar";
 import { Card, CardHeader, CardContent } from "@/components/ui/card";
@@ -10,6 +10,30 @@ import { Copy, Printer, Trash2 } from "lucide-react";
 
 export default function OrdersPage() {
   const [collapsed, setCollapsed] = useState(false);
+  const [stats, setStats] = useState({
+    total_orders_this_month: 0,
+    pending_orders: 0,
+    shipped_orders: 0,
+    refunded_orders: 0,
+  });
+
+  useEffect(() => {
+    const base = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
+    fetch(`${base}/orders/stats`)
+      .then((r) => r.json())
+      .then((data) => {
+        setStats((prev) => ({
+          ...prev,
+          total_orders_this_month: data.total_orders_this_month ?? 0,
+          pending_orders: data.pending_orders ?? 0,
+          shipped_orders: data.shipped_orders ?? 0,
+          refunded_orders: data.refunded_orders ?? 0,
+        }));
+      })
+      .catch((err) => {
+        console.error("Failed to load order stats", err);
+      });
+  }, []);
   return (
     <div className="flex min-h-screen bg-muted/30">
       <Sidebar collapsed={collapsed} />
@@ -22,16 +46,31 @@ export default function OrdersPage() {
           </section>
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {["Total Orders This Month", "Pending Orders", "Shipped Orders", "Refunded Orders"].map(
-              (title, i) => (
-                <Card key={title}>
-                  <CardHeader>
-                    <div className="text-xs text-muted-foreground">{title}</div>
-                    <div className="mt-2 text-2xl font-semibold">{[200, 20, 180, 10][i]}</div>
-                  </CardHeader>
-                </Card>
-              )
-            )}
+            {[
+              { title: "Total Orders This Month", color: "bg-blue-500" },
+              { title: "Pending Orders", color: "bg-yellow-500" },
+              { title: "Shipped Orders", color: "bg-green-500" },
+              { title: "Refunded Orders", color: "bg-red-500" },
+            ].map(({ title, color }, i) => (
+              <Card key={title}>
+                <CardHeader>
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <span className={`inline-block h-2 w-2 rounded-full ${color}`} />
+                    {title}
+                  </div>
+                  <div className="mt-2 text-2xl font-semibold">
+                    {
+                      [
+                        stats.total_orders_this_month,
+                        stats.pending_orders,
+                        stats.shipped_orders,
+                        stats.refunded_orders,
+                      ][i]
+                    }
+                  </div>
+                </CardHeader>
+              </Card>
+            ))}
           </div>
 
           <div className="mt-6 rounded-xl border border-border bg-background p-4 shadow-sm">
