@@ -35,6 +35,19 @@ class OrderUpdate(BaseModel):
     order_date: Optional[str] = None
 
 
+class BulkStatusUpdate(BaseModel):
+    order_ids: List[str]
+    status: str
+
+
+class BulkDuplicate(BaseModel):
+    order_ids: List[str]
+
+
+class BulkDelete(BaseModel):
+    order_ids: List[str]
+
+
 def row_to_order(row) -> dict:
     return {
         "id": row["id"],
@@ -107,6 +120,133 @@ def list_orders(
             }
     except HTTPException:
         raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+
+@router.put("/bulk/status")
+def bulk_update_status(payload: BulkStatusUpdate):
+    if payload.status not in ALLOWED_STATUSES:
+        raise HTTPException(status_code=400, detail="Invalid status")
+    if not payload.order_ids:
+        raise HTTPException(status_code=400, detail="order_ids required")
+
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            placeholders = ",".join(["?"] * len(payload.order_ids))
+
+            # Only update those that exist
+            cursor.execute(
+                f"SELECT id FROM orders WHERE id IN ({placeholders})",
+                payload.order_ids,
+            )
+            existing_ids = [row[0] for row in cursor.fetchall()]
+            if not existing_ids:
+                return {"updated_count": 0, "orders": []}
+
+            placeholders = ",".join(["?"] * len(existing_ids))
+            cursor.execute(
+                f"UPDATE orders SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id IN ({placeholders})",
+                [payload.status] + existing_ids,
+            )
+
+            updated_count = cursor.rowcount if cursor.rowcount is not None else len(existing_ids)
+            orders = [{"id": oid, "status": payload.status} for oid in existing_ids]
+            return {"updated_count": updated_count, "orders": orders}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+
+@router.post("/bulk/duplicate", status_code=201)
+def bulk_duplicate(payload: BulkDuplicate):
+    if not payload.order_ids:
+        raise HTTPException(status_code=400, detail="order_ids required")
+
+    try:
+        import uuid
+        from datetime import datetime
+
+        with get_db() as conn:
+            cursor = conn.cursor()
+
+            placeholders = ",".join(["?"] * len(payload.order_ids))
+            cursor.execute(
+                f"""
+                SELECT id, order_number, customer_name, customer_email, customer_avatar,
+                       order_date, status, total_amount, payment_status
+                FROM orders WHERE id IN ({placeholders})
+                """,
+                payload.order_ids,
+            )
+            originals = cursor.fetchall()
+
+            new_orders = []
+            for row in originals:
+                new_id = str(uuid.uuid4())
+                new_order_number = next_order_number(conn)
+                now_iso = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+
+                cursor.execute(
+                    """
+                    INSERT INTO orders (
+                        id, order_number, customer_name, customer_email, customer_avatar,
+                        order_date, status, total_amount, payment_status,
+                        created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        new_id,
+                        new_order_number,
+                        row["customer_name"],
+                        row["customer_email"],
+                        row["customer_avatar"],
+                        row["order_date"],
+                        row["status"],
+                        row["total_amount"],
+                        row["payment_status"],
+                        now_iso,
+                        now_iso,
+                    ),
+                )
+
+                new_orders.append(
+                    {
+                        "id": new_id,
+                        "order_number": new_order_number,
+                        "original_order_id": row["id"],
+                    }
+                )
+
+            return {"duplicated_count": len(new_orders), "new_orders": new_orders}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+
+@router.delete("/bulk")
+def bulk_delete(payload: BulkDelete):
+    if not payload.order_ids:
+        raise HTTPException(status_code=400, detail="order_ids required")
+
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            placeholders = ",".join(["?"] * len(payload.order_ids))
+
+            # Count existing
+            cursor.execute(
+                f"SELECT COUNT(1) FROM orders WHERE id IN ({placeholders})",
+                payload.order_ids,
+            )
+            existing_count = cursor.fetchone()[0]
+
+            cursor.execute(
+                f"DELETE FROM orders WHERE id IN ({placeholders})",
+                payload.order_ids,
+            )
+
+            deleted_count = cursor.rowcount if cursor.rowcount is not None else existing_count
+            return {"deleted_count": deleted_count, "deleted_ids": payload.order_ids}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
